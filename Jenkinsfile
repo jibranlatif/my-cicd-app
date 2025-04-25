@@ -4,6 +4,7 @@ pipeline {
     environment {
         DOCKER_IMAGE = 'my-cicd-app-image'
         DOCKER_TAG = 'latest'
+        CONTAINER_NAME = 'my-cicd-app-container'
     }
 
     stages {
@@ -16,7 +17,7 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 script {
-                    docker.build(DOCKER_IMAGE, '.')
+                    docker.build("${DOCKER_IMAGE}:${DOCKER_TAG}", '.')
                 }
             }
         }
@@ -24,23 +25,5 @@ pipeline {
         stage('Run Docker Container') {
             steps {
                 script {
-                    docker.image(DOCKER_IMAGE).run('-d -p 5000:5000')
-                }
-            }
-        }
-
-        stage('Cleanup') {
-            steps {
-                script {
-                    docker.image(DOCKER_IMAGE).remove()
-                }
-            }
-        }
-    }
-
-    post {
-        always {
-            cleanWs()
-        }
-    }
-}
+                    // Store container reference for later cleanup
+                    docker.image("${DOCKER_IMAGE}:${DOCKER_TAG}
