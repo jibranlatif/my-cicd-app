@@ -25,5 +25,4 @@ pipeline {
         stage('Run Docker Container') {
             steps {
                 script {
-                    // Store container reference for later cleanup
-                    docker.image("${DOCKER_IMAGE}:${DOCKER_TAG}
+                    docker.image("${DOCKER_IMAGE}:${
