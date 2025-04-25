@@ -17,16 +17,15 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 script {
-                    // Force rebuild by adding --no-cache
                     sh "docker build --no-cache -t ${DOCKER_IMAGE}:${DOCKER_TAG} ."
                 }
             }
         }
 
-        stage('Run Docker Container') {
+        stage('Run and Verify Container') {
             steps {
                 script {
-                    // Run with proper environment variables
+                    // Run container with health check
                     sh """
                         docker run -d \
                           --name ${CONTAINER_NAME} \
@@ -36,9 +35,44 @@ pipeline {
                           ${DOCKER_IMAGE}:${DOCKER_TAG}
                     """
                     
-                    // Verify container started
-                    sh "docker ps -f name=${CONTAINER_NAME}"
-                    sh "docker logs ${CONTAINER_NAME} --tail 20"
+                    // Verify container started properly
+                    def healthy = false
+                    timeout(time: 1, unit: 'MINUTES') {
+                        waitUntil {
+                            try {
+                                def status = sh(
+                                    script: "docker inspect --format='{{.State.Health.Status}}' ${CONTAINER_NAME}",
+                                    returnStdout: true
+                                ).trim()
+                                
+                                if (status == 'healthy') {
+                                    healthy = true
+                                    return true
+                                }
+                                
+                                // If no health check, verify logs
+                                def logs = sh(
+                                    script: "docker logs ${CONTAINER_NAME} 2>&1 | tail -20",
+                                    returnStdout: true
+                                )
+                                
+                                if (logs.contains('Running on http://0.0.0.0:5000')) {
+                                    healthy = true
+                                    return true
+                                }
+                                
+                                sleep(5)
+                                return false
+                            } catch (Exception e) {
+                                sleep(5)
+                                return false
+                            }
+                        }
+                    }
+                    
+                    if (!healthy) {
+                        error("Container failed to start properly")
+                    }
                 }
             }
         }
@@ -46,22 +80,11 @@ pipeline {
         stage('Test Application') {
             steps {
                 script {
-                    // Wait with timeout and retries
-                    timeout(time: 1, unit: 'MINUTES') {
-                        waitUntil {
-                            try {
-                                sh """
-                                    curl -sSf http://localhost:5000 && \
-                                    echo "Application is running" && \
-                                    exit 0 || \
-                                    { echo "Waiting for application to start..."; exit 1; }
-                                """
-                                return true
-                            } catch (Exception e) {
-                                sleep(5)
-                                return false
-                            }
-                        }
+                    retry(3) {
+                        sh """
+                            curl -sSf http://localhost:5000 || \
+                            { docker logs ${CONTAINER_NAME}; exit 1; }
+                        """
                     }
                 }
             }
@@ -71,7 +94,6 @@ pipeline {
     post {
         always {
             script {
-                // Cleanup
                 sh """
                     docker stop ${CONTAINER_NAME} || true
                     docker rm ${CONTAINER_NAME} || true
