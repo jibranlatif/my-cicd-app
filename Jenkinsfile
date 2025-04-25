@@ -10,11 +10,8 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
-                // Either use the declarative SCM checkout (recommended)
+                // Remove duplicate checkout - keep only this one
                 checkout scm
-                
-                // OR explicitly specify git checkout
-                // git branch: 'main', url: 'https://github.com/jibranlatif/my-cicd-app.git'
             }
         }
 
@@ -29,9 +26,14 @@ pipeline {
         stage('Run Docker Container') {
             steps {
                 script {
+                    // Remove duplicate -d flag and add proper Flask environment variables
                     docker.image("${DOCKER_IMAGE}:${DOCKER_TAG}").run(
-                        "--name ${CONTAINER_NAME} -p 5000:5000 -d"
+                        "--name ${CONTAINER_NAME} -p 5000:5000 -e FLASK_APP=app.py -e FLASK_ENV=development"
                     )
+                    
+                    // Verify container started
+                    sh "docker ps -f name=${CONTAINER_NAME}"
+                    sh "docker logs ${CONTAINER_NAME}"
                 }
             }
         }
@@ -39,13 +41,14 @@ pipeline {
         stage('Test Application') {
             steps {
                 script {
-                    sleep(time: 10, unit: 'SECONDS') // Wait for app to start
-                    
-                    // Verify container is running
-                    sh "docker ps -f name=${CONTAINER_NAME}"
-                    
-                    // Test the endpoint
-                    sh "curl -sSf http://localhost:5000 || echo 'Application not responding'"
+                    // Wait longer and add retries
+                    retry(3) {
+                        sleep(time: 5, unit: 'SECONDS')
+                        sh """
+                            curl -sSf http://localhost:5000 || \
+                            { echo 'Application not responding'; docker logs ${CONTAINER_NAME}; exit 1; }
+                        """
+                    }
                 }
             }
         }
@@ -54,7 +57,7 @@ pipeline {
     post {
         always {
             script {
-                // Cleanup containers and images
+                // Cleanup
                 sh """
                     docker stop ${CONTAINER_NAME} || true
                     docker rm ${CONTAINER_NAME} || true
