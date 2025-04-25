@@ -10,7 +10,6 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
-                // Remove duplicate checkout - keep only this one
                 checkout scm
             }
         }
@@ -18,7 +17,8 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 script {
-                    docker.build("${DOCKER_IMAGE}:${DOCKER_TAG}", '.')
+                    // Force rebuild by adding --no-cache
+                    sh "docker build --no-cache -t ${DOCKER_IMAGE}:${DOCKER_TAG} ."
                 }
             }
         }
@@ -26,14 +26,19 @@ pipeline {
         stage('Run Docker Container') {
             steps {
                 script {
-                    // Remove duplicate -d flag and add proper Flask environment variables
-                    docker.image("${DOCKER_IMAGE}:${DOCKER_TAG}").run(
-                        "--name ${CONTAINER_NAME} -p 5000:5000 -e FLASK_APP=app.py -e FLASK_ENV=development"
-                    )
+                    // Run with proper environment variables
+                    sh """
+                        docker run -d \
+                          --name ${CONTAINER_NAME} \
+                          -p 5000:5000 \
+                          -e FLASK_APP=app.py \
+                          -e FLASK_ENV=development \
+                          ${DOCKER_IMAGE}:${DOCKER_TAG}
+                    """
                     
                     // Verify container started
                     sh "docker ps -f name=${CONTAINER_NAME}"
-                    sh "docker logs ${CONTAINER_NAME}"
+                    sh "docker logs ${CONTAINER_NAME} --tail 20"
                 }
             }
         }
@@ -41,13 +46,22 @@ pipeline {
         stage('Test Application') {
             steps {
                 script {
-                    // Wait longer and add retries
-                    retry(3) {
-                        sleep(time: 5, unit: 'SECONDS')
-                        sh """
-                            curl -sSf http://localhost:5000 || \
-                            { echo 'Application not responding'; docker logs ${CONTAINER_NAME}; exit 1; }
-                        """
+                    // Wait with timeout and retries
+                    timeout(time: 1, unit: 'MINUTES') {
+                        waitUntil {
+                            try {
+                                sh """
+                                    curl -sSf http://localhost:5000 && \
+                                    echo "Application is running" && \
+                                    exit 0 || \
+                                    { echo "Waiting for application to start..."; exit 1; }
+                                """
+                                return true
+                            } catch (Exception e) {
+                                sleep(5)
+                                return false
+                            }
+                        }
                     }
                 }
             }
