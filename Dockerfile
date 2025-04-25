@@ -15,4 +15,8 @@ ENV FLASK_ENV=development
 
 EXPOSE 5000
 
+# Add health check
+HEALTHCHECK --interval=5s --timeout=3s --retries=3 \
+  CMD curl -f http://localhost:5000/ || exit 1
+
 CMD ["flask", "run", "--host", "0.0.0.0"]
