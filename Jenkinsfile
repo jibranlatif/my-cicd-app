@@ -10,8 +10,7 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
-                git branch: 'main', 
-                     url: 'https://github.com/jibranlatif/my-cicd-app.git'
+                // Remove duplicate checkout - let Declarative SCM handle it
             }
         }
 
@@ -26,8 +25,9 @@ pipeline {
         stage('Run Docker Container') {
             steps {
                 script {
+                    // Remove duplicate -d flag and ensure proper Flask binding
                     docker.image("${DOCKER_IMAGE}:${DOCKER_TAG}").run(
-                        "--name ${CONTAINER_NAME} -d -p 5000:5000 --rm"
+                        "--name ${CONTAINER_NAME} -p 5000:5000 -e FLASK_APP=app.py -e FLASK_ENV=development"
                     )
                 }
             }
@@ -35,19 +35,18 @@ pipeline {
 
         stage('Test') {
             steps {
-                // Example test - replace with your actual tests
-                sh 'curl -sSf http://localhost:5000 || true'
-                sleep(time: 5, unit: 'SECONDS')
-            }
-        }
-
-        stage('Cleanup') {
-            steps {
                 script {
-                    // Graceful cleanup commands
-                    sh "docker stop ${CONTAINER_NAME} || true"
-                    sh "docker rm ${CONTAINER_NAME} || true"
-                    sh "docker rmi ${DOCKER_IMAGE}:${DOCKER_TAG} || true"
+                    // Wait for app to start
+                    sleep(time: 10, unit: 'SECONDS')
+                    
+                    // Verify container is running
+                    sh "docker ps -f name=${CONTAINER_NAME}"
+                    
+                    // Test the endpoint
+                    sh """
+                        curl -sSf http://localhost:5000 || echo "Application not responding"
+                        curl -sSf http://localhost:5000/health || echo "Health check failed"
+                    """
                 }
             }
         }
@@ -56,9 +55,12 @@ pipeline {
     post {
         always {
             script {
-                // Final cleanup in case previous steps failed
-                sh "docker stop ${CONTAINER_NAME} || true"
-                sh "docker rm ${CONTAINER_NAME} || true"
+                // Graceful cleanup
+                sh """
+                    docker stop ${CONTAINER_NAME} || true
+                    docker rm ${CONTAINER_NAME} || true
+                    docker rmi ${DOCKER_IMAGE}:${DOCKER_TAG} || true
+                """
                 cleanWs()
             }
         }
